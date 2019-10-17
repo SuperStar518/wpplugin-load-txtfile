@@ -319,13 +319,11 @@ class Txtfiles_List extends WP_List_Table
  */
 class LoadTxtfile_Plugin
 {
-	# class instance
 	static $instance;
 
 	# txtfile WP_List_Table object
 	public $txtfiles_obj;
 
-	# class constructor
 	public function __construct()
 	{
 		add_filter("set-screen-option", [__CLASS__, "set_screen"], 10, 3);
@@ -354,7 +352,7 @@ class LoadTxtfile_Plugin
 	{
 		$option = "per_page";
 		$args   = [
-			"label"   => "Txtfiles",
+			"label"   => "Txtlines",
 			"default" => 5,
 			"option"  => "txtfiles_per_page"
 		];
@@ -366,10 +364,12 @@ class LoadTxtfile_Plugin
 
 	public function plugin_txtfiles_page()
 	{
+		$this->handle_text_load();
 	?>
+
+		<h1>Hello PlayersVoice!</h1>
 		<div class="wrap">
 			<h2>My WP Plugin for Loading Txtfile</h2>
-
 			<div id="poststuff">
 				<div id="post-body" class="metabox-holder columns-2">
 					<div id="post-body-content">
@@ -385,8 +385,68 @@ class LoadTxtfile_Plugin
 				</div>
 				<br class="clear">
 			</div>
+			<!--  -->
+			<h2>Load a text file</h2>
+			<form method="post" enctype="multipart/form-data">
+				<input type="file" id="btn_load_txtfile" name="btn_load_txtfile">
+				<?php
+					submit_button("Load Text");
+				?>
+			</form>
 		</div>
+
 	<?php
+	}
+
+	public function handle_text_load() {
+		if (isset($_FILES["btn_load_txtfile"]))
+		{
+			$file_handle = $_FILES["btn_load_txtfile"]["tmp_name"];
+			if ($file_handle)
+			{
+				try {
+					# read text file as array
+					$my_txt = file($file_handle);
+	
+					# save to DB
+					$this->save_db($my_txt);
+				} catch (\Throwable $ex) {
+					echo $ex->getMessage();
+				}
+			}
+			else
+			{
+				echo "<script>alert('Please choose .txt file')</script>";
+				return;
+			}
+		}
+	}
+
+	public function save_db($data) {
+		global $wpdb;
+		$tblname = $wpdb->prefix . "loadtxtfile";
+	
+		if (!empty($data))
+		{
+			try {
+				foreach ($data as $line)
+				{
+					if (str_word_count($line) != 0)
+					{
+						$wpdb->insert(
+							$tblname,
+							array(
+								"loadtime" => current_time("mysql"), # timestamp
+								"txtline" => mb_strimwidth($line, 0, 200, "..."), # sentences aren't longer than 200 characters in length
+								"wordnum" => str_word_count($line) # number of words
+							)
+						);
+					}
+				}
+			} catch (\Throwable $ex) {
+				echo $ex->getMessage();
+			}
+		}
 	}
 
 	public static function get_instance()
@@ -407,102 +467,3 @@ add_action("plugins_loaded", function() {
 
 });
 
-
-
-
-
-/**
- * init plugin
- */
-
-function plugin_init() {
-	handle_text_load();
-?>
-
-	<h1>Hello PlayersVoice!</h1>
-	<br>
-	<h2>Load a text file</h2>
-	<form method="post" enctype="multipart/form-data">
-		<input type="file" id="btn_load_txtfile" name="btn_load_txtfile">
-		<?php
-			submit_button("Load Text");
-		?>
-	</form>
-
-<?php
-}
-
-function handle_text_load() {
-	if (isset($_FILES["btn_load_txtfile"]))
-	{
-		$file_handle = $_FILES["btn_load_txtfile"]["tmp_name"];
-		if ($file_handle)
-		{
-			try {
-				# read text file as array
-				$my_txt = file($file_handle);
-
-				# save to DB
-				save_db($my_txt);
-
-				draw_text_table($my_txt);
-			} catch (\Throwable $ex) {
-				echo $ex->getMessage();
-			}
-		}
-		else
-		{
-			echo "<script>alert('Please choose .txt file')</script>";
-			return;
-		}
-	}
-}
-
-function save_db($data) {
-	global $wpdb;
-	$tblname = $wpdb->prefix . "loadtxtfile";
-
-	if (!empty($data))
-	{
-		try {
-			foreach ($data as $line)
-			{
-				if (str_word_count($line) != 0)
-				{
-					$wpdb->insert(
-						$tblname,
-						array(
-							"loadtime" => current_time("mysql"),
-							"txtline" => mb_strimwidth($line, 0, 200, "..."),
-							"wordnum" => str_word_count($line)
-						)
-					);
-				}
-			}
-		} catch (\Throwable $ex) {
-			echo $ex->getMessage();
-		}
-	}
-}
-
-function draw_text_table($data) {
-	$tbl_html = "";
-
-	if (!empty($data))
-	{
-		try {
-			$tbl_html = "<ul>";
-			foreach ($data as $line)
-			{
-				$tbl_html .= "<li>" . $line . "</li>";
-			}
-			$tbl_html .= "</ul>";
-		} catch (\Throwable $ex) {
-			echo $ex->getMessage();
-		}
-	}
-
-	echo $tbl_html;
-}
-
-?>
