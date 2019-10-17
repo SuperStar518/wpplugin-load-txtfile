@@ -114,6 +114,7 @@ function create_plugin_database_table()
 
 register_activation_hook(__FILE__, "create_plugin_database_table");
 
+
 /**
  * include WP_List_Table class in plugin
  */
@@ -122,18 +123,300 @@ if (!class_exists('WP_List_Table'))
 	require_once(ABSPATH . "wp-admin/includes/class-wp-list-table.php");
 }
 
+class Txtfiles_List extends WP_List_Table
+{
+	public function __construct()
+	{
+		parent::__construct([
+			"singular" => __("Txtfile", "sp"), # singular name of the listed records
+			"plural"   => __("Txtfiles", "sp"), # plural name of the listed records
+			"ajax"     => false # should this table support ajax?
+		]);
+	}
+
+	public static function get_txtfiles($per_page = 5, $page_number = 1)
+	{
+		global $wpdb;
+
+		$sql = "SELECT * FROM {$wpdb->prefix}loadtxtfile";
+		if (!empty($_REQUEST["orderby"]))
+		{
+			$sql .= " ORDER BY " . esc_sql($_REQUEST["orderby"]);
+			$sql .= !empty($_REQUEST["order"]) ? " " . esc_sql($_REQUEST["order"]) : "ASC";
+		}
+		$sql .= " LIMIT $per_page";
+		$sql .= " OFFSET " . ($page_number - 1) * $per_page;
+
+		$result = $wpdb->get_results($sql, "ARRAY_A");
+
+		return $result;
+	}
+
+	public static function delete_txtfile($id)
+	{
+		global $wpdb;
+
+		$wpdb->delete(
+			"{$wpdb->prefix}loadtxtfile",
+			[ "ID" => $id ],
+			[ "%d" ]
+		);
+	}
+
+	public static function record_count()
+	{
+		global $wpdb;
+
+		$sql = "SELECT COUNT(*) FROM {$wpdb->prefix}loadtxtfile";
+
+		return $wpdb->get_var($sql);
+	}
+
+	public function no_items()
+	{
+		_e("No txtfiles avaliable.", "sp");
+	}
+
+	function column_name($item)
+	{
+		// create a nonce
+		$delete_nonce = wp_create_nonce("sp_delete_txtfile");
+
+		$title = "<strong>" . $item["name"] . "</strong>";
+
+		$actions = [
+			"delete" => sprintf(
+				"<a href='?page=%s&action=%s&txtfile=%s&_wpnonce=%s'>Delete</a>",
+				esc_attr($_REQUEST["page"]),
+				"delete",
+				absint($item["ID"]),
+				$delete_nonce
+			)
+		];
+
+		return $title . $this->row_actions($actions);
+	}
+
+	public function column_default($item, $column_name)
+	{
+		switch ($column_name)
+		{
+			case "loadtime":
+				return $item[$column_name];
+			case "txtline":
+				return $item[$column_name];
+			case "wordnum":
+				return $item[$column_name];
+			default:
+				return print_r($item, true); # Show the whole array for troubleshooting purpose
+		}
+	}
+
+	function column_cb($item)
+	{
+		return sprintf(
+			"<input type='checkbox' name='bulk-delete[]' value='%s' />",
+			$item["ID"]
+		);
+	}
+
+	function get_columns()
+	{
+		$columns = [
+			"cb"		=> "<input type='checkbox' />",
+			"loadtime"	=> __("Loadtime", "sp"),
+			"txtline"	=> __("Txtline", "sp"),
+			"wordnum"	=> __("Wordnum", "sp")
+		];
+
+		return $columns;
+	}
+
+	public function get_sortable_columns()
+	{
+		$sortable_columns = array(
+			"loadtime"	=> array("loadtime", true),
+			"txtline"	=> array("txtline", true),
+			"wordnum"	=> array("wordnum", false)
+		);
+		# not working properly
+		return $sortable_columns;
+	}
+
+	public function get_bulk_actions()
+	{
+		$actions = [
+			"bulk-delete" => "Delete"
+		];
+
+		return $actions;
+	}
+
+	public function prepare_items()
+	{
+		$this->_column_headers = $this->get_column_info();
+
+		# Process bulk action
+		$this->process_bulk_action();
+
+		$per_page     = $this->get_items_per_page("txtfiles_per_page", 5);
+		$current_page = $this->get_pagenum();
+		$total_items  = self::record_count();
+
+		$this->set_pagination_args([
+			"total_items" => $total_items,
+			"per_page"    => $per_page
+		]);
+
+		$this->items = self::get_txtfiles($per_page, $current_page);
+	}
+
+	public function process_bulk_action()
+	{
+		# Detect when a bulk action is being triggered
+		if ("delete" == $this->current_action())
+		{
+			# In our file that handles the request, verify the nonce
+			$nonce = esc_attr($_REQUEST["_wpnonce"]);
+
+			if (!wp_verify_nonce($nonce, "sp_delete_txtfile"))
+			{
+				die("Go get a life script kiddies");
+			}
+			else
+			{
+				self::delete_txtfile(absint($_GET["txtfile"]));
+
+				wp_redirect(esc_url(add_query_arg()));
+				exit;
+			}
+		}
+
+		# If the delete bulk action is triggered
+		if (
+			(isset($_POST["action"]) && $_POST["action"] == "bulk-delete" ) ||
+			(isset($_POST["action2"]) && $_POST["action2"] == "bulk-delete")
+		)
+		{
+			$delete_ids = esc_sql($_POST["bulk-delete"]);
+
+			# loop over the array of record IDs and delete them
+			foreach ($delete_ids as $id)
+			{
+				self::delete_txtfile($id);
+			}
+
+			wp_redirect(esc_url(add_query_arg()));
+			exit;
+		}
+	}
+
+}
+
+
+/**
+ * building the page
+ */
+class LoadTxtfile_Plugin
+{
+	# class instance
+	static $instance;
+
+	# txtfile WP_List_Table object
+	public $txtfiles_obj;
+
+	# class constructor
+	public function __construct()
+	{
+		add_filter("set-screen-option", [__CLASS__, "set_screen"], 10, 3);
+		add_action("admin_menu", [$this, "plugin_menu"]);
+	}
+
+	public static function set_screen($status, $option, $value)
+	{
+		return $value;
+	}
+
+	public function plugin_menu()
+	{
+		$hook = add_menu_page(
+			"My Plugin Page",
+			"Load-Text-File Plugin",
+			"manage_options",
+			"my-plugin",
+			[$this, "plugin_txtfiles_page"]
+		);
+
+		add_action("load-$hook", [$this, "screen_option"]);
+	}
+
+	public function screen_option()
+	{
+		$option = "per_page";
+		$args   = [
+			"label"   => "Txtfiles",
+			"default" => 5,
+			"option"  => "txtfiles_per_page"
+		];
+
+		add_screen_option($option, $args);
+
+		$this->txtfiles_obj = new Txtfiles_List();
+	}
+
+	public function plugin_txtfiles_page()
+	{
+	?>
+		<div class="wrap">
+			<h2>My WP Plugin for Loading Txtfile</h2>
+
+			<div id="poststuff">
+				<div id="post-body" class="metabox-holder columns-2">
+					<div id="post-body-content">
+						<div class="meta-box-sortables ui-sortable">
+							<form method="post">
+								<?php
+									$this->txtfiles_obj->prepare_items();
+									$this->txtfiles_obj->display();
+								?>
+							</form>
+						</div>
+					</div>
+				</div>
+				<br class="clear">
+			</div>
+		</div>
+	<?php
+	}
+
+	public static function get_instance()
+	{
+		if (!isset(self::$instance))
+		{
+			self::$instance = new self();
+		}
+
+		return self::$instance;
+	}
+
+}
+
+add_action("plugins_loaded", function() {
+
+	LoadTxtfile_Plugin::get_instance();
+
+});
+
+
+
+
+
 /**
  * init plugin
  */
-add_action("admin_menu", "my_plugin_setup_menu");
-
-function my_plugin_setup_menu() {
-	add_menu_page("My Plugin Page", "Load-Text-File Plugin", "manage_options", "my-plugin", "plugin_init");
-}
 
 function plugin_init() {
 	handle_text_load();
-	load_db();
 ?>
 
 	<h1>Hello PlayersVoice!</h1>
@@ -173,10 +456,6 @@ function handle_text_load() {
 			return;
 		}
 	}
-}
-
-function load_db() {
-	//
 }
 
 function save_db($data) {
